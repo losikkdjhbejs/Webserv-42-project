@@ -1,57 +1,28 @@
-# ---------- toolchain ----------
-CXX := c++
+NAME = p
 
-# ---------- flags ----------
-CXXFLAGS = -Wall -Wextra -Werror -O2 -std=c++98 -I./src
-DEPFLAGS = -MMD -MP
+CXX = c++
 
-# ---------- sources ----------
-SRCS = src/main.cpp \
-       src/cgi/CgiHandler.cpp \
-       src/config/ConfigurationFile.cpp \
-       src/config/LocationBlock.cpp \
-       src/config/ParserUtils.cpp \
-       src/config/ServerConfigParser.cpp \
-       src/config/WebserverConfig.cpp \
-       src/http/HTTPRequest.cpp \
-       src/http/HTTPResponse.cpp \
-       src/http/RequestHandler.cpp \
-       src/http/Methods/Delete.cpp \
-       src/http/Methods/Get.cpp \
-       src/http/Methods/Post.cpp \
-       src/server/client.cpp \
-       src/server/EpollManager.cpp \
-       src/server/server.cpp \
-       src/utils/Helpers.cpp \
-       src/utils/SignalHandling.cpp \
-       src/utils/FileCache.cpp \
-       src/utils/Logger.cpp \
-       src/utils/PathUtils.cpp
+CXXFLAGS = -Wall -Wextra -Werror -std=c++98
+
+SRCS = main.cpp \
+		src/core/Connection.cpp \
+		src/core/Server.cpp \
+		src/http/HttpRequest.cpp \
 
 OBJS = $(SRCS:.cpp=.o)
-DEPS = $(OBJS:.o=.d)
 
-NAME = webserv
-
-# ---------- rules ----------
 all: $(NAME)
 
 $(NAME): $(OBJS)
-	$(CXX) $(CXXFLAGS) $(OBJS) -o $(NAME)
+	$(CXX) $(CXXFLAGS) $^ -o $@
 
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(DEPS)
+	rm -rf $(OBJS)
 
 fclean: clean
-	rm -f $(NAME)
+	rm -rf $(NAME)
 
 re: fclean all
-
-.PHONY: all clean fclean re
-
-.SECONDARY: $(OBJS)
-
--include $(DEPS)

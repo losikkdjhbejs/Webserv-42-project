@@ -1,0 +1,24 @@
+Connection
+      │
+      ▼
+HttpRequest
+      │
+      ▼
+Router
+      │
+      ▼
+RouteResult
+      │
+      ▼
+RequestHandler
+      │
+      ▼
+HttpResponse
+      │
+      ▼
+serialize()
+      │
+      ▼
+send()
+
+
