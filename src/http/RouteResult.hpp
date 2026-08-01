@@ -4,10 +4,11 @@ class RouteResult
         const Server* server;
         const Location* location;
 
-        std::string filesystemPath;
+        std::string fileSystemPath;
 
         bool isCGI;
         bool autoindex;
-
+        
+        std::string cgiExecutable;
         RouteResult();
 };
