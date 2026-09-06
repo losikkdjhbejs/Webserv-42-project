@@ -1,3 +1,6 @@
+#ifndef HTTPREQUEST_HPP
+#define HTTPREQUEST_HPP
+
 #include <string>
 #include <vector>
 #include <map>
@@ -35,6 +38,7 @@ private:
     Version version;
     std::string target;
     std::string path;
+    
     std::map<std::string,std::string> queryParams;
 
     std::map<std::string,std::string> headers;
@@ -85,3 +89,5 @@ public:
     
     bool keepAlive() const;
 };
+
+#endif

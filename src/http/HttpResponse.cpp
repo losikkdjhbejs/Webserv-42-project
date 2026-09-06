@@ -79,7 +79,7 @@ std::vector<char> HttpResponse::serialize() const {
     response.insert(response.end(), text.begin(), text.end());
     response.push_back(' ');
     response.insert(response.end(), reasonPhrase.begin(), reasonPhrase.end());
-    response.insert(response.end(), "\r\n", "\r\n" + 2);
+    response.insert(response.end(), &"\r\n"[0], &"\r\n"[2]);
     std::map<std::string, std::string>::const_iterator it;
     for (it = headers.begin(); it != headers.end(); it++) {
         
@@ -89,7 +89,7 @@ std::vector<char> HttpResponse::serialize() const {
         response.push_back(' ');
         text = it->second;
         response.insert(response.end(), text.begin(), text.end());
-        response.insert(response.end(), "\r\n", "\r\n" + 2);
+        response.insert(response.end(), &"\r\n"[0], &"\r\n"[2]);
     }
     if (!hasHeader("Content-Length")) {
 
@@ -101,9 +101,9 @@ std::vector<char> HttpResponse::serialize() const {
         ss << body.size();
         std::string length = ss.str();
         response.insert(response.end(), length.begin(), length.end());
-        response.insert(response.end(), "\r\n", "\r\n" + 2);
+        response.insert(response.end(), &"\r\n"[0], &"\r\n"[2]);
     }
-    response.insert(response.end(), "\r\n", "\r\n" + 2);
+    response.insert(response.end(), &"\r\n"[0], &"\r\n"[2]);
     response.insert(response.end(), body.begin(), body.end());
     return response;
 }

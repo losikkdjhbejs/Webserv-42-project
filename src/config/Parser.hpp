@@ -18,7 +18,7 @@ class Parser
         Config parseConfig();
         Server parseServer();
         Location parseLocation();
-        std::pair<std::string, std::vector<std::string>> parseDirective();
+        std::pair<std::string, std::vector<std::string> > parseDirective();
         const Token& consume();
         const Token& current() const;
         Token expect(Token::Type type);

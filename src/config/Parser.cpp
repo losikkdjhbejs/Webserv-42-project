@@ -43,7 +43,8 @@ std::pair<std::string, std::vector<std::string> > Parser::parseDirective()
 Location Parser::parseLocation()
 {
     Location location;
-    std::map<std::string, std::vector<std::string>> directives;
+
+    std::map<std::string, std::vector<std::string> > directives;
 
     Token locationBlock = expect(Token::WORD);
 
@@ -52,7 +53,9 @@ Location Parser::parseLocation()
     Token pathToken = expect(Token::WORD);
     expect(Token::LBRACE);
     while (current().type != Token::RBRACE) {
-        std::pair<std::string, std::vector<std::string> > d = parseDirective();             
+        if (current().type == Token::END)
+            throw std::runtime_error("unexpected end of file: expected '}'");
+        std::pair<std::string, std::vector<std::string> > d = parseDirective();
         if (directives.count(d.first))
             throw std::runtime_error("duplicate directive");
 
@@ -72,6 +75,8 @@ Server Parser::parseServer() {
     expect(Token::LBRACE);
     while (current().type != Token::RBRACE)
     {
+        if (current().type == Token::END)
+            throw std::runtime_error("unexpected end of file: expected '}'");
         if (current().type == Token::WORD && current().value == "location") {
             Location loc = parseLocation();
             for (size_t i = 0; i < server.locations.size(); i++)
@@ -82,11 +87,11 @@ Server Parser::parseServer() {
             server.locations.push_back(loc);
         }
         else {
-            std::pair<std::string, std::vector<std::string>> d = parseDirective();
-            if (server.directives.count(d.first))
+            std::pair<std::string, std::vector<std::string> > d = parseDirective();             
+            if (server.directives.count(d.first) && d.first != "error_page")
                 throw std::runtime_error("duplicate directive");
+            server.directives[d.first].insert(server.directives[d.first].end(), d.second.begin(), d.second.end());
 
-            server.directives.insert(d);
         }
     }
     expect(Token::RBRACE);
@@ -99,7 +104,7 @@ Server Parser::parseServer() {
     if (server.directives.find("root") == server.directives.end())
         throw std::runtime_error("missing root");
     return server;
-    }
+}
 
 Config Parser::parseConfig() {
     Config config;
@@ -109,7 +114,6 @@ Config Parser::parseConfig() {
     }
     return config;
 }
-
 
 Config Parser::parse() {
     return parseConfig();

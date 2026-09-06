@@ -1,6 +1,14 @@
-#include <map>
+#ifndef SERVER_HPP
+#define SERVER_HPP
+
+#include "Location.hpp"
+#include <string>
+
 class Server {
     public:
         std::map<std::string, std::vector<std::string> > directives;
-        const std::vector<Location>& locations;
+        std::vector<Location> locations;
 };
+
+
+#endif

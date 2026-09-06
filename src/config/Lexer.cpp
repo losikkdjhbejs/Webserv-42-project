@@ -6,7 +6,7 @@
 #include <cctype>
 #include <vector>
 
-Lexer::Lexer(const std::string& filename): pos(0), source(readFile(filename)) {}
+Lexer::Lexer(const std::string& filename): source(readFile(filename)), pos(0) {}
 
 std::string Lexer::readFile(const std::string& filename) {
     std::ifstream file(filename.c_str());
@@ -52,12 +52,9 @@ Token Lexer::nextToken() {
             break;
         
         default:
-            while (pos < source.size() &&
-                    !std::isspace(static_cast<unsigned char>(source[pos])) &&
-                    source[pos] != '{' && source[pos] != '}' && source[pos] != ';')
+            while (pos < source.size() && !std::isspace(static_cast<unsigned char>(source[pos])) && source[pos] != '{' && source[pos] != '}' && source[pos] != ';')
                 lexeme.push_back(source[pos++]);
             return Token(Token::WORD, lexeme);
-            break;
     }
 }
 

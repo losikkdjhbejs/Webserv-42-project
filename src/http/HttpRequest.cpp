@@ -1,9 +1,7 @@
 #include  "HttpRequest.hpp"
 #include <sstream>
-#include <cstdlib>
 #include <cctype>
 #include  <vector>
-#include <cerrno>
 
 
 HttpRequest::HttpRequest()
@@ -183,16 +181,34 @@ bool HttpRequest::parseHeaders() {
                 return false;
             }
 
-            char *end;
-            errno = 0;
-            long len = std::strtol(value.c_str(), &end, 10);
-
-            if (errno != 0 || *end != '\0' || len < 0) {
+            if (value.empty())
+            {
                 state = ERROR;
                 return false;
             }
 
-            contentLength = static_cast<size_t>(len);
+            size_t len = 0;
+
+            for (size_t i = 0; i < value.size(); ++i)
+            {
+                if (!std::isdigit(static_cast<unsigned char>(value[i])))
+                {
+                    state = ERROR;
+                    return false;
+                }
+
+                size_t digit = value[i] - '0';
+
+                if (len > (static_cast<size_t>(-1) - digit) / 10)
+                {
+                    state = ERROR;
+                    return false;
+                }
+
+                len = len * 10 + digit;
+            }
+
+            contentLength = len;
         }
         
         if (key == "connection" || key == "transfer-encoding") {
@@ -368,13 +384,30 @@ const std::vector<char>& HttpRequest::getBody() const {
     return body;
 }
 
-bool HttpRequest::hasHeader(const std::string& key) const {
-    return headers.find(key) != headers.end();
+bool HttpRequest::hasHeader(const std::string& key) const
+{
+    std::string lower = key;
+
+    for (size_t i = 0; i < lower.size(); ++i)
+        lower[i] = std::tolower(static_cast<unsigned char>(lower[i]));
+
+    return headers.find(lower) != headers.end();
 }
 
-const std::string& HttpRequest::getHeader(const std::string& key) const {
-    if (this->hasHeader(key))
-        return headers.find(key)->second;
+
+const std::string& HttpRequest::getHeader(const std::string& key) const
+{
+    std::string lower = key;
+
+    for (size_t i = 0; i < lower.size(); ++i)
+        lower[i] = std::tolower(static_cast<unsigned char>(lower[i]));
+
+    std::map<std::string, std::string>::const_iterator it =
+        headers.find(lower);
+
+    if (it != headers.end())
+        return it->second;
+
     static const std::string empty;
     return empty;
 }
@@ -392,6 +425,5 @@ bool HttpRequest::keepAlive() const
         else
             return getHeader("connection") == "keep-alive";
     }
-
     return version == HTTP_1_1;
 }

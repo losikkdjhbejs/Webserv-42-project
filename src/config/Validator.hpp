@@ -2,6 +2,7 @@
 #define VALIDATOR_HPP
 
 #include "Config.hpp"
+#include <string>
 
 class Validator
 {

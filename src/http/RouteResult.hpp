@@ -1,3 +1,7 @@
+#ifndef ROUTERESULT_HPP
+#define ROUTERESULT_HPP
+
+#include "../config/Server.hpp"
 class RouteResult
 {
     public:
@@ -12,3 +16,5 @@ class RouteResult
         std::string cgiExecutable;
         RouteResult();
 };
+
+#endif

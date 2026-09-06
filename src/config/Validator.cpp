@@ -4,6 +4,8 @@
 
 void Validator::validate(const Config& config)
 {
+    if (config.servers.empty())
+        throw std::runtime_error("no server configured");
     for (size_t i = 0; i < config.servers.size(); i++)
         validateServer(config.servers[i]);
 }
@@ -149,7 +151,7 @@ void Validator::validateClientMaxBodySize(const std::vector<std::string>& args)
     if (args.size() != 1)
         throw std::runtime_error("client_max_body_size takes one argument");
 
-        char *end;
+    char *end;
     long value = std::strtol(args[0].c_str(), &end, 10);
 
     if (*end != '\0')
@@ -161,7 +163,7 @@ void Validator::validateClientMaxBodySize(const std::vector<std::string>& args)
 
 void Validator::validateErrorPage(const std::vector<std::string>& args)
 {
-    if (args.size() != 2)
+    if (args.size() < 2)
         throw std::runtime_error("error_page takes two arguments");
 
     char *end;

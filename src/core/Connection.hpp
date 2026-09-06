@@ -1,19 +1,22 @@
+#ifndef CONNECTION_HPP
+#define CONNECTION_HPP
+
 #include <iostream>
 #include "../http/HttpRequest.hpp"
 #include "../http/HttpResponse.hpp"
 #include <vector>
 #include <string>
 
-// Owns the lifetime of one TCP client.
-// Stores everything that must survive between epoll events.
 class Connection {
     private:
-        std::vector<char> writeBuffer;
         int clientFd;
+        std::vector<char> writeBuffer;
+        size_t writeOffset;
         HttpRequest request;
+        bool keepAlive;
     public:
         Connection(int fd);
-        void appendReadData(const char* data, size_t n);
+        void appendData(const char* data, size_t n);
         bool hasCompleteRequest() const;
         HttpRequest& getRequest();
         void clearRequest();
@@ -22,4 +25,11 @@ class Connection {
         const std::vector<char>& getWriteBuffer() const;
         void clear();
         void clearWriteBuffer();
+        void advanceWriteOffset(size_t n);
+        bool hasPendingWrite() const;
+        size_t getWriteOffset() const;
+        void setKeepAlive(bool value);
+        bool shouldKeepAlive() const;
 };
+
+#endif

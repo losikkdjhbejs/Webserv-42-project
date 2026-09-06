@@ -1,6 +1,11 @@
+#ifndef HTTPRESPONSE_HPP
+#define HTTPRESPONSE_HPP
+
+#include "HttpRequest.hpp"
+
 class HttpResponse
 {
-public:
+    public:
     HttpResponse();
 
     void setVersion(HttpRequest::Version version);
@@ -30,3 +35,5 @@ private:
 
     std::vector<char> body;
 };
+
+#endif

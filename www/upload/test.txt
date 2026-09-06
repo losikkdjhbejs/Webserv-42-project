@@ -1,0 +1,53 @@
+new content
+
+
+
+
+
+
+                                                        epoll_create1();
+                                                        epoll_ctl();
+                                                        epoll_wait();
+                                                        close();
+
+
+
+
+
+                                                        
+                                                        socket();
+                                                        bind();
+                                                        listen();
+                                                        accept();
+                                                        recv();
+                                                        send();
+                                                        
+
+int epfd = epoll_create1(0);
+
+if (epfd == -1) {
+    perror("epoll_create1");
+    exit(1);
+}
+
+    struct epoll_event event;
+    event.events = EPOLLIN;
+    event.data.fd = sockfd;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, sockfd, &event);
+
+    struct epoll_event events[10];
+    int n = epoll_wait(epfd, events, 10, -1);
+
+    for (int i = 0; i < n; i++) {
+        int fd = events[i].data.fd;
+
+        if (events[i].events & EPOLLIN) {
+            
+        }
+    }
+
+
+
+
+
+close(epfd);

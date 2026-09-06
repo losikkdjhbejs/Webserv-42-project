@@ -1,10 +1,15 @@
-#include "Server.hpp"
+#include "WebServer.hpp"
+#include "../http/Router.hpp"
+#include <cstdlib>
+#include <arpa/inet.h>
+#include "Connection.hpp"
 
-Server::Server(ConfigLoader config) {
-    this->config = config;
+WebServer::WebServer(ConfigLoader configLoader) {
+    this->config = configLoader.load();
+    requestHandler = RequestHandler();
 }
 
-void Server::run() {
+void WebServer::run() {
     if (setUpSocket())
         return;
     if (setUpEpoll())
@@ -13,7 +18,7 @@ void Server::run() {
     close(serverfd);
 }
 
-int Server::setUpSocket() {
+int WebServer::setUpSocket() {
     serverfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if (serverfd == -1)
     {
@@ -31,8 +36,12 @@ int Server::setUpSocket() {
     sockaddr_in addr = {};
 
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(8080);
+    
+    std::string host = config.servers[0].directives["host"][0];
+    addr.sin_addr.s_addr = inet_addr(host.c_str());
+
+    int port = std::atoi(config.servers[0].directives["listen"][0].c_str());
+    addr.sin_port = htons(port);
 
     int bindres = bind(serverfd, (sockaddr *)&addr, sizeof(addr));
     if (bindres == -1)
@@ -48,10 +57,12 @@ int Server::setUpSocket() {
         close(serverfd);
         return 1;
     }
+
+    std::cout << "Server is listening " << " ..." << std::endl;
     return 0;
 }
 
-int Server::setUpEpoll() {
+int WebServer::setUpEpoll() {
     epollfd = epoll_create1(EPOLL_CLOEXEC);
     if (epollfd == -1)
     {
@@ -73,11 +84,9 @@ int Server::setUpEpoll() {
     return 0;
 }
 
-int Server::eventLoop() {
-
+int WebServer::eventLoop() {
     while (true)
     {
-        std::cout << "Waiting for cllients............" << std::endl;
         epoll_event events[1024];
         int nfds = epoll_wait(epollfd, events, 1024, -1);
         if (nfds == -1)
@@ -90,6 +99,8 @@ int Server::eventLoop() {
         {
             if (events[i].data.fd == serverfd)
                 acceptConnections();
+            else if (events[i].events & EPOLLOUT)
+                handleWrite(events[i].data.fd);
             else
                 handleClient(events[i]);
         }
@@ -97,20 +108,21 @@ int Server::eventLoop() {
     return 1;
 }
 
-void Server::acceptConnections() {
+void WebServer::acceptConnections() {
     while (true) {
         int clientfd = accept(serverfd, 0, 0);
         if (clientfd < 0)
             break;
+
         int flags = fcntl(clientfd, F_GETFL, 0);
-        clients[clientfd] = Connection(clientfd);
+
         if (flags == -1 || fcntl(clientfd, F_SETFL, flags | O_NONBLOCK) == -1)
         {
             std::cout << "fcntl failed" << std::endl;
             close(clientfd);
-            clients.erase(clientfd);
             continue;
         }
+        clients.insert(std::make_pair(clientfd, Connection(clientfd)));
 
         epoll_event client_ev = {};
         client_ev.events = EPOLLIN;
@@ -120,16 +132,18 @@ void Server::acceptConnections() {
         {
             std::cout << "epoll_ctr failed" << std::endl;
             close(clientfd);
+            clients.erase(clientfd);
             continue;
         }
     }
 }
 
-void Server::handleClient(epoll_event& event) {
+void WebServer::handleClient(epoll_event& event) {
     char buffer[1024];
 
     int fd = event.data.fd;
     int bytes = read(fd, buffer, 1023);
+    std::cout << "bytes = " << bytes << std::endl;
     if (bytes < 0)
     {
         return;
@@ -142,27 +156,98 @@ void Server::handleClient(epoll_event& event) {
         clients.erase(fd);
         return;
     }
-    clients[fd].appendReadData(buffer, bytes);
 
-    if (clients[fd].hasCompleteRequest())
+    std::map<int, Connection>::iterator it = clients.find(fd);
+
+    if (it == clients.end())
     {
-        HttpResponse response(clients[fd].getRequest());
+        clients.insert(std::make_pair(fd, Connection(fd)));
+        it = clients.find(fd);
+    }
 
-        HttpRequest request = connection.getRequest();
+    Connection &clientConnection =  it->second;
+    clientConnection.appendData(buffer, bytes);
+    
+    if (clientConnection.hasCompleteRequest())
+    {
+        Router router(config);
 
-        HttpResponse response = requestHandler.handle(request);
+        HttpRequest request = clientConnection.getRequest();
+        RouteResult routeResult = router.route(request);
+        HttpResponse response = requestHandler.handle(request, routeResult);
+        if (request.keepAlive())
+        {
+            response.setHeader("Connection", "keep-alive");
+            clientConnection.setKeepAlive(true);
+        }
+        else
+        {
+            response.setHeader("Connection", "close");
+            clientConnection.setKeepAlive(false);
+        }
+        clientConnection.setWriteBuffer(response.serialize());
 
-        connection.setWriteBuffer(response.serialize());
-        
-        clients[fd].setWriteBuffer(response.serialize());
+        epoll_event ev = {};
+        ev.events = EPOLLOUT;
+        ev.data.fd = fd;
 
-        write(
-            fd,
-            clients[fd].getWriteBuffer().data(),
-            clients[fd].getWriteBuffer().size()
-        );
+        if (epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &ev) == -1)
+        {
+            close(fd);
+            clients.erase(fd);
+        }
+    }
+}
+
+void WebServer::handleWrite(int fd)
+{
+    std::cout << "WRITE EVENT fd=" << fd << std::endl;
+
+    std::map<int, Connection>::iterator it = clients.find(fd);
+    Connection& connection = it->second;
+
+    const std::vector<char>& buffer = connection.getWriteBuffer();
+
+    size_t offset = connection.getWriteOffset();
+
+    size_t bytes = write(
+        fd,
+        buffer.data() + offset,
+        buffer.size() - offset
+    );
+
+    if (bytes < 0)
+    {
         close(fd);
         epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
         clients.erase(fd);
+        return;
+    }
+
+    connection.advanceWriteOffset(bytes);
+
+    if (!connection.hasPendingWrite())
+    {
+        if (connection.shouldKeepAlive())
+        {
+            connection.clearWriteBuffer();
+            connection.clearRequest();
+
+            epoll_event ev = {};
+            ev.events = EPOLLIN;
+            ev.data.fd = fd;
+
+            if (epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &ev) == -1)
+            {
+                close(fd);
+                clients.erase(fd);
+            }
+        }
+        else
+        {
+            epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
+            close(fd);
+            clients.erase(fd);
+        }
     }
 }

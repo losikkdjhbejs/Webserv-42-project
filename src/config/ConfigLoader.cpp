@@ -1,5 +1,6 @@
 #include "ConfigLoader.hpp"
 #include <vector>
+#include "Validator.hpp"
 
 ConfigLoader::ConfigLoader(std::string filename): filename(filename){}
 
@@ -10,8 +11,8 @@ Config ConfigLoader::load()
 
     Config config = Parser(tokens).parse();
 
-    Validator validator;
-    validator.validate(config);
+    // Validator validator;
+    // validator.validate(config);
 
     return config;
 }

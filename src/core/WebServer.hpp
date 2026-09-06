@@ -1,4 +1,9 @@
+#ifndef WEBSERVER_HPP
+#define WEBSERVER_HPP
+
 #include "../config/ConfigLoader.hpp"
+#include "../config/Config.hpp"
+#include "../http/RequestHandler.hpp"
 #include "Connection.hpp"
 #include <map>
 #include <sys/socket.h>
@@ -8,22 +13,23 @@
 #include <sys/epoll.h>
 #include <fcntl.h>
 
-// Owns the server infrastructure:
-// configuration, listening sockets,
-// epoll instance and all active connections.
 
-class Server {
+class WebServer {
     private:
-        ConfigLoader config;
+        Config config;
         int serverfd;
-        int epollfd; 
+        int epollfd;
+        RequestHandler requestHandler;
         std::map<int, Connection> clients;
         int  setUpSocket();
         int setUpEpoll();
-        void eventLoop();
+        int eventLoop();
         void acceptConnections();
         void handleClient(epoll_event& event);
+        void handleWrite(int fd);
     public:
-        Server(ConfigLoader ConfigLoader);
+        WebServer(ConfigLoader configloader);
         void run();
 };
+
+#endif
