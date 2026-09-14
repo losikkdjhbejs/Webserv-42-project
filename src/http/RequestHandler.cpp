@@ -14,18 +14,28 @@
 #include <dirent.h>
 #include <string>
 #include <cstdlib>
+#include <sstream>
 
 RequestHandler::RequestHandler() {}
 
-HttpResponse RequestHandler::handle(const HttpRequest &request, const RouteResult &routResult)
+HttpResponse RequestHandler::handle(const HttpRequest &request, const RouteResult &routeResult)
 {
-    if (request.getMethod() == HttpRequest::GET)
-        return handleGet(request, routResult);
-    else if (request.getMethod() == HttpRequest::POST)
-        return handlePost(request, routResult);
-    else if (request.getMethod() == HttpRequest::DELETE)
-        return handleDelete(request, routResult);
     HttpResponse response = HttpResponse();
+
+    if (!valid_body_size(request, routeResult))
+    {
+        response.setVersion(request.getVersion());
+        response.setStatus(413);
+        std::string msg = "Body too large.";
+        response.setBody(std::vector<char>(msg.begin(), msg.end()));
+        return response;
+    }
+    if (request.getMethod() == HttpRequest::GET)
+        return handleGet(request, routeResult);
+    else if (request.getMethod() == HttpRequest::POST)
+        return handlePost(request, routeResult);
+    else if (request.getMethod() == HttpRequest::DELETE)
+        return handleDelete(request, routeResult);
     response.setVersion(request.getVersion());
     response.setStatus(405);
     std::string body = "Method not supported.";
@@ -33,10 +43,41 @@ HttpResponse RequestHandler::handle(const HttpRequest &request, const RouteResul
     return response;
 }
 
+bool RequestHandler::valid_body_size(const HttpRequest &request, const RouteResult &routeResult)
+{
+    unsigned long size_limit;
+
+    std::map<std::string, std::vector<std::string> >::const_iterator it =
+        routeResult.location->directives.find("client_max_body_size");
+
+    if (it != routeResult.location->directives.end())
+    {
+        size_limit = std::strtoul(it->second[0].c_str(), NULL, 10);
+
+        std::cout << "BODY SIZE  : " << request.getBody().size() << std::endl;
+        std::cout << "BODY LIMIT : " << size_limit << std::endl;
+        return request.getBody().size() <= size_limit;
+    }
+
+    it = routeResult.server->directives.find("client_max_body_size");
+
+    if (it != routeResult.server->directives.end())
+    {
+        size_limit = std::strtoul(it->second[0].c_str(), NULL, 10);
+
+        std::cout << "BODY SIZE  : " << request.getBody().size() << std::endl;
+        std::cout << "BODY LIMIT : " << size_limit << std::endl;
+        return request.getBody().size() <= size_limit;
+    }
+
+    std::cout << "NO BODY LIMIT" << std::endl;
+    return true;
+}
+
 HttpResponse RequestHandler::handleGet(const HttpRequest &request, const RouteResult &routeResult)
 {
     HttpResponse response;
-
+    response.setHeader("Set-Cookie", "session=123; Path=/");
     response.setVersion(request.getVersion());
 
     struct stat pathInfo;
@@ -80,6 +121,8 @@ HttpResponse RequestHandler::handleGet(const HttpRequest &request, const RouteRe
 HttpResponse RequestHandler::serveFile(const std::string &fileSystemPath)
 {
     HttpResponse response;
+    response.setHeader("Set-Cookie", "session=123; Path=/");
+    response.setHeader("Set-Cookie", "session=123; Path=/");
     std::ifstream file(fileSystemPath.c_str(), std::ios::binary);
 
     if (!file.is_open())
@@ -104,6 +147,7 @@ HttpResponse RequestHandler::serveFile(const std::string &fileSystemPath)
 HttpResponse RequestHandler::handleDirectory(const HttpRequest &request, const RouteResult &routeResult)
 {
     HttpResponse response;
+    response.setHeader("Set-Cookie", "session=123; Path=/");
 
     if (routeResult.location == NULL)
     {
@@ -161,6 +205,7 @@ HttpResponse RequestHandler::generateAutoIndex(const HttpRequest &request, const
 {
 
     HttpResponse response;
+    response.setHeader("Set-Cookie", "session=123; Path=/");
 
     DIR *dir = opendir(routeResult.fileSystemPath.c_str());
 
@@ -217,36 +262,176 @@ HttpResponse RequestHandler::generateAutoIndex(const HttpRequest &request, const
     return response;
 }
 
-HttpResponse RequestHandler::handlePost(const HttpRequest &request, const RouteResult &routeResult) {
-    HttpResponse response;
-    response.setVersion(request.getVersion());
-
-    // CGI POST
+HttpResponse RequestHandler::handlePost(const HttpRequest &request, const RouteResult &routeResult)
+{
     if (routeResult.isCGI)
         return handleCGI(request, routeResult);
 
-    struct stat pathInfo;
+    std::map<std::string, std::string>::const_iterator it =request.getHeaders().find("content-type");
 
-    bool exists =
-        (stat(routeResult.fileSystemPath.c_str(), &pathInfo) == 0);
-
-    // Existing resource must be a regular file
-    if (exists && !S_ISREG(pathInfo.st_mode))
+    if (it != request.getHeaders().end() && it->second.find("multipart/form-data") == 0)
     {
-        return handleError(request, 403, routeResult);
+        return handleMultipartUpload(request, routeResult);
     }
 
-    // Create / overwrite file
-    std::ofstream file(
-        routeResult.fileSystemPath.c_str(),
-        std::ios::binary);
+    return saveRequestBodyToFile(request, routeResult);
+}
+
+HttpResponse RequestHandler::handleMultipartUpload(const HttpRequest &request, const RouteResult &routeResult)
+{
+    HttpResponse response;
+    response.setHeader("Set-Cookie", "session=123; Path=/");
+    response.setVersion(request.getVersion());
+
+    std::map<std::string, std::string>::const_iterator it = request.getHeaders().find("content-type");
+
+    if (it == request.getHeaders().end())
+        return handleError(request, 400, routeResult);
+
+    std::string contentType = it->second;
+
+    // 1. Extract boundary
+    size_t boundaryPos = contentType.find("boundary=");
+    if (boundaryPos == std::string::npos)
+        return handleError(request, 400, routeResult);
+
+    std::string boundary = contentType.substr(boundaryPos + 9);
+
+    // Remove possible quotes
+    if (boundary.size() >= 2 && boundary[0] == '"' && boundary[boundary.size() - 1] == '"')
+    {
+        boundary = boundary.substr(1, boundary.size() - 2);
+    }
+
+    boundary = "--" + boundary;
+
+    // 2. Get raw request body
+    const std::vector<char> &body = request.getBody();
+
+    if (body.empty())
+        return handleError(request, 400, routeResult);
+
+    std::string data(body.begin(), body.end());
+
+    // 3. Find first multipart boundary
+    size_t partStart = data.find(boundary);
+    if (partStart == std::string::npos)
+        return handleError(request, 400, routeResult);
+
+    partStart += boundary.length();
+
+    // Skip CRLF after boundary
+    if (data.compare(partStart, 2, "\r\n") == 0)
+        partStart += 2;
+
+    // 4. Find end of part headers
+    size_t headersEnd = data.find("\r\n\r\n", partStart);
+    if (headersEnd == std::string::npos)
+        return handleError(request, 400, routeResult);
+
+    std::string partHeaders = data.substr(partStart, headersEnd - partStart);
+
+    // 5. Extract filename
+    size_t filenamePos = partHeaders.find("filename=\"");
+
+    if (filenamePos == std::string::npos)
+        return handleError(request, 400, routeResult);
+
+    filenamePos += 10;
+
+    size_t filenameEnd = partHeaders.find("\"", filenamePos);
+
+    if (filenameEnd == std::string::npos)
+        return handleError(request, 400, routeResult);
+
+    std::string filename =
+        partHeaders.substr(filenamePos, filenameEnd - filenamePos);
+
+    // 6. Sanitize filename
+    size_t slash = filename.find_last_of("/\\");
+
+    if (slash != std::string::npos)
+        filename = filename.substr(slash + 1);
+
+    if (filename.empty() || filename == "." || filename == "..")
+    {
+        return handleError(request, 400, routeResult);
+    }
+
+    // 7. Find beginning of file data
+    size_t contentStart = headersEnd + 4;
+
+    // 8. Find next boundary
+    size_t contentEnd = data.find(boundary, contentStart);
+
+    if (contentEnd == std::string::npos)
+        return handleError(request, 400, routeResult);
+
+    // Remove CRLF immediately before boundary
+    if (contentEnd >= 2 && data[contentEnd - 2] == '\r' && data[contentEnd - 1] == '\n')
+    {
+        contentEnd -= 2;
+    }
+
+    // 9. Build destination path
+    std::string filePath = routeResult.fileSystemPath;
+
+    if (!filePath.empty() && filePath[filePath.length() - 1] != '/')
+    {
+        filePath += "/";
+    }
+
+    filePath += filename;
+
+    // 10. Save actual file bytes
+    std::ofstream file(filePath.c_str(), std::ios::binary);
 
     if (!file.is_open())
+        return handleError(request, 500, routeResult);
+
+    file.write(data.data() + contentStart, contentEnd - contentStart);
+
+    if (!file)
     {
+        file.close();
         return handleError(request, 500, routeResult);
     }
 
-    const std::vector<char>& body = request.getBody();
+    file.close();
+
+    // 11. Response
+    response.setStatus(201);
+    response.setHeader("Content-Type", "text/html");
+
+    std::string responseBody =
+        "<html><body>"
+        "<h1>201 Created</h1>"
+        "<p>File uploaded successfully.</p>"
+        "</body></html>";
+
+    response.setBody(std::vector<char>(responseBody.begin(), responseBody.end()));
+
+    return response;
+}
+
+HttpResponse RequestHandler::saveRequestBodyToFile(const HttpRequest &request, const RouteResult &routeResult)
+{
+    HttpResponse response;
+    response.setVersion(request.getVersion());
+
+    struct stat pathInfo;
+
+    bool exists = (stat(routeResult.fileSystemPath.c_str(), &pathInfo) == 0);
+
+    if (exists && !S_ISREG(pathInfo.st_mode))
+        return handleError(request, 403, routeResult);
+
+    std::ofstream file(routeResult.fileSystemPath.c_str(), std::ios::binary);
+
+    if (!file.is_open())
+        return handleError(request, 500, routeResult);
+
+    const std::vector<char> &body = request.getBody();
 
     if (!body.empty())
     {
@@ -264,12 +449,7 @@ HttpResponse RequestHandler::handlePost(const HttpRequest &request, const RouteR
     response.setStatus(201);
 
     std::string text = "Created";
-
-    response.setBody(
-        std::vector<char>(
-            text.begin(),
-            text.end()));
-
+    response.setBody(std::vector<char>(text.begin(), text.end()));
     return response;
 }
 

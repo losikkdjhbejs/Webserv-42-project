@@ -7,12 +7,14 @@ Router::Router(const Config &config) : config(config)
 {
 }
 
-RouteResult Router::route(const HttpRequest &request)
+RouteResult Router::route(const HttpRequest &request, const Server &listeningServer)
 {
     if (config.servers.empty())
         throw std::runtime_error("No server configured");
     RouteResult routeResult;
     std::string host;
+
+    routeResult.server = &listeningServer;
 
     if (request.hasHeader("Host"))
         host = request.getHeader("Host");
@@ -46,9 +48,6 @@ RouteResult Router::route(const HttpRequest &request)
                 break;
         }
     }
-
-    if (routeResult.server == NULL)
-        routeResult.server = &config.servers[0];
 
     routeResult.location = findLocation(routeResult.server->locations, request.getPath());
 
@@ -120,30 +119,6 @@ RouteResult Router::route(const HttpRequest &request)
 
     return routeResult;
 }
-
-// const Location* Router::findLocation(const std::vector<Location>& locations, const std::string& requestPath) {
-//     const Location* best = NULL;
-
-//     std::cout << "remove me: locations size : " << locations.size() << std::endl;
-//     std::cout << "remove me: request path : " << requestPath << std::endl;
-
-//     for (size_t i = 0; i < locations.size(); ++i)
-//     {
-//         std::cout << "remove me: locations path : " << locations[i].path << std::endl;
-
-//         if (requestPath == locations[i].path || (requestPath.find(locations[i].path) == 0 && requestPath[locations[i].path.length()] == '/'))
-//         {
-//             if (best == NULL || locations[i].path.length() > best->path.length())
-//             {
-//                 best = &locations[i];
-//             }
-//         }
-//     }
-
-//     std::cout << "Remove me: founded location path : " << best->path << std::endl;
-
-//     return best;
-// }
 
 const Location *Router::findLocation(const std::vector<Location> &locations, const std::string &requestPath)
 {

@@ -4,113 +4,177 @@
 #include <arpa/inet.h>
 #include "Connection.hpp"
 
-WebServer::WebServer(ConfigLoader configLoader) {
+WebServer::WebServer(ConfigLoader configLoader)
+{
     this->config = configLoader.load();
     requestHandler = RequestHandler();
 }
 
-void WebServer::run() {
+void WebServer::run()
+{
     if (setUpSocket())
         return;
+
     if (setUpEpoll())
         return;
+
     eventLoop();
-    close(serverfd);
+
+    for (std::map<int, const Server *>::iterator it = serverfds.begin();
+        it != serverfds.end(); ++it)
+    {
+        close(it->first);
+    }
+
+    close(epollfd);
 }
 
-int WebServer::setUpSocket() {
-    serverfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-    if (serverfd == -1)
+int WebServer::setUpSocket()
+{
+    for (size_t i = 0; i < config.servers.size(); ++i)
     {
-        std::cout << "socket creation failed" << std::endl;
-        return 1;
+        int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+
+        if (fd == -1)
+        {
+            std::cout << "socket creation failed" << std::endl;
+            return 1;
+        }
+
+        int opt = 1;
+        if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)
+        {
+            std::cout << "setsockopt failed" << std::endl;
+            close(fd);
+            return 1;
+        }
+
+        sockaddr_in addr = {};
+        addr.sin_family = AF_INET;
+
+        std::string host =
+            config.servers[i].directives["host"][0];
+
+        int port =
+            std::atoi(config.servers[i].directives["listen"][0].c_str());
+
+        addr.sin_addr.s_addr = inet_addr(host.c_str());
+        addr.sin_port = htons(port);
+
+        if (bind(fd, (sockaddr *)&addr, sizeof(addr)) == -1)
+        {
+            std::cout << "bind failed on port "
+                      << port << std::endl;
+
+            close(fd);
+            return 1;
+        }
+
+        if (listen(fd, 1000) == -1)
+        {
+            std::cout << "listen failed on port "
+                      << port << std::endl;
+
+            close(fd);
+            return 1;
+        }
+
+        serverfds[fd] = &config.servers[i];
+
+        std::cout << "Server listening on "
+                  << host << ":" << port << std::endl;
     }
 
-    int opt = 1;
-    if (setsockopt(serverfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
-        std::cout << "setsocket failed.\n";
-        close(serverfd);
-        return 1;
-    }
-
-    sockaddr_in addr = {};
-
-    addr.sin_family = AF_INET;
-    
-    std::string host = config.servers[0].directives["host"][0];
-    addr.sin_addr.s_addr = inet_addr(host.c_str());
-
-    int port = std::atoi(config.servers[0].directives["listen"][0].c_str());
-    addr.sin_port = htons(port);
-
-    int bindres = bind(serverfd, (sockaddr *)&addr, sizeof(addr));
-    if (bindres == -1)
-    {
-        std::cout << "bind failed" << std::endl;
-        close(serverfd);
-        return 1;
-    }
-
-    if (listen(serverfd, 1000) == -1)
-    {
-        std::cout << "listening failed.." << std::endl;
-        close(serverfd);
-        return 1;
-    }
-
-    std::cout << "Server is listening " << " ..." << std::endl;
     return 0;
 }
 
-int WebServer::setUpEpoll() {
+int WebServer::setUpEpoll()
+{
     epollfd = epoll_create1(EPOLL_CLOEXEC);
+
     if (epollfd == -1)
     {
         std::cout << "epoll_create failed.." << std::endl;
-        close(serverfd);
-        return 1;
-    }
-    epoll_event ev = {};
-    ev.events = EPOLLIN;
-    ev.data.fd = serverfd;
 
-    int epoll_ctl_res = epoll_ctl(epollfd, EPOLL_CTL_ADD, serverfd, &ev);
-    if (epoll_ctl_res == -1)
-    {
-        std::cout << "epoll_ctr failed" << std::endl;
-        close(serverfd);
+        for (std::map<int, const Server *>::iterator it = serverfds.begin();
+             it != serverfds.end(); ++it)
+        {
+            close(it->first);
+        }
+
         return 1;
     }
+
+    for (std::map<int, const Server *>::iterator it = serverfds.begin();
+         it != serverfds.end(); ++it)
+    {
+        int listenfd = it->first;
+
+        epoll_event ev = {};
+        ev.events = EPOLLIN;
+        ev.data.fd = listenfd;
+
+        if (epoll_ctl(
+                epollfd,
+                EPOLL_CTL_ADD,
+                listenfd,
+                &ev) == -1)
+        {
+            std::cout << "epoll_ctl failed" << std::endl;
+
+            close(listenfd);
+            return 1;
+        }
+    }
+
     return 0;
 }
 
-int WebServer::eventLoop() {
+bool WebServer::isListeningSocket(int fd) const
+{
+    return serverfds.find(fd) != serverfds.end();
+}
+
+int WebServer::eventLoop()
+{
     while (true)
     {
         epoll_event events[1024];
-        int nfds = epoll_wait(epollfd, events, 1024, -1);
+
+        int nfds = epoll_wait(
+            epollfd,
+            events,
+            1024,
+            -1);
+
         if (nfds == -1)
         {
             std::cout << "epoll_wait failed" << std::endl;
-            close(serverfd);
             return 1;
         }
-        for (int i = 0; i < nfds; i++)
+
+        for (int i = 0; i < nfds; ++i)
         {
-            if (events[i].data.fd == serverfd)
-                acceptConnections();
+            int fd = events[i].data.fd;
+
+            if (isListeningSocket(fd))
+                acceptConnections(fd);
             else if (events[i].events & EPOLLOUT)
-                handleWrite(events[i].data.fd);
-            else
+                handleWrite(fd);
+            else if (events[i].events & EPOLLIN)
                 handleClient(events[i]);
         }
     }
-    return 1;
+
+    return 0;
 }
 
-void WebServer::acceptConnections() {
-    while (true) {
-        int clientfd = accept(serverfd, 0, 0);
+void WebServer::acceptConnections(int listenfd)
+{
+    while (true)
+    {
+        int clientfd = accept(listenfd, 0, 0);
+
         if (clientfd < 0)
             break;
 
@@ -122,15 +186,30 @@ void WebServer::acceptConnections() {
             close(clientfd);
             continue;
         }
-        clients.insert(std::make_pair(clientfd, Connection(clientfd)));
+
+        std::map<int, const Server *>::const_iterator serverIt = serverfds.find(listenfd);
+
+        if (serverIt == serverfds.end())
+        {
+            close(clientfd);
+            return;
+        }
+
+        const Server *server = serverIt->second;
+        clients.insert(std::make_pair(clientfd, Connection(clientfd, server)));
 
         epoll_event client_ev = {};
         client_ev.events = EPOLLIN;
         client_ev.data.fd = clientfd;
-        int epoll_ctl_res = epoll_ctl(epollfd, EPOLL_CTL_ADD, clientfd, &client_ev);
-        if (epoll_ctl_res == -1)
+
+        if (epoll_ctl(
+                epollfd,
+                EPOLL_CTL_ADD,
+                clientfd,
+                &client_ev) == -1)
         {
-            std::cout << "epoll_ctr failed" << std::endl;
+            std::cout << "epoll_ctl failed" << std::endl;
+
             close(clientfd);
             clients.erase(clientfd);
             continue;
@@ -138,7 +217,8 @@ void WebServer::acceptConnections() {
     }
 }
 
-void WebServer::handleClient(epoll_event& event) {
+void WebServer::handleClient(epoll_event &event)
+{
     char buffer[1024];
 
     int fd = event.data.fd;
@@ -161,19 +241,29 @@ void WebServer::handleClient(epoll_event& event) {
 
     if (it == clients.end())
     {
-        clients.insert(std::make_pair(fd, Connection(fd)));
-        it = clients.find(fd);
+        std::cerr << "ERROR: client connection not found\n";
+        close(fd);
+        epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
+        return;
     }
 
-    Connection &clientConnection =  it->second;
+
+    Connection &clientConnection = it->second;
+    const Server *server = clientConnection.getServer();
+    if (server == NULL)
+    {
+        std::cerr << "ERROR: client has no server\n";
+        return;
+    }
     clientConnection.appendData(buffer, bytes);
-    
+
     if (clientConnection.hasCompleteRequest())
     {
         Router router(config);
 
         HttpRequest request = clientConnection.getRequest();
-        RouteResult routeResult = router.route(request);
+        RouteResult routeResult = router.route(request, *server);
+        
         HttpResponse response = requestHandler.handle(request, routeResult);
         if (request.keepAlive())
         {
@@ -204,17 +294,16 @@ void WebServer::handleWrite(int fd)
     std::cout << "WRITE EVENT fd=" << fd << std::endl;
 
     std::map<int, Connection>::iterator it = clients.find(fd);
-    Connection& connection = it->second;
+    Connection &connection = it->second;
 
-    const std::vector<char>& buffer = connection.getWriteBuffer();
+    const std::vector<char> &buffer = connection.getWriteBuffer();
 
     size_t offset = connection.getWriteOffset();
 
     size_t bytes = write(
         fd,
         buffer.data() + offset,
-        buffer.size() - offset
-    );
+        buffer.size() - offset);
 
     if (bytes < 0)
     {

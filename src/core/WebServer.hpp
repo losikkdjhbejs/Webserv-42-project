@@ -17,16 +17,17 @@
 class WebServer {
     private:
         Config config;
-        int serverfd;
+        std::map<int, const Server *> serverfds;
         int epollfd;
         RequestHandler requestHandler;
         std::map<int, Connection> clients;
         int  setUpSocket();
         int setUpEpoll();
         int eventLoop();
-        void acceptConnections();
+        void acceptConnections(int listenfd);
         void handleClient(epoll_event& event);
         void handleWrite(int fd);
+        bool isListeningSocket(int fd) const;
     public:
         WebServer(ConfigLoader configloader);
         void run();

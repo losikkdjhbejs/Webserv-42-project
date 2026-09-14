@@ -1,7 +1,19 @@
 #include "Connection.hpp"
 
-Connection::Connection(int fd): clientFd(fd), writeOffset(0), keepAlive(false) {}
+Connection::Connection()
+    : clientFd(-1), server(NULL), writeOffset(0),  keepAlive(false)
+{
+}
 
+Connection::Connection(int fd, const Server *server)
+    : clientFd(fd),  server(server), writeOffset(0), keepAlive(false)
+{
+}
+
+const Server *Connection::getServer() const
+{
+    return server;
+}
 void Connection::appendData(const char* data, size_t n) {
     request.appendData(data, n);
 }

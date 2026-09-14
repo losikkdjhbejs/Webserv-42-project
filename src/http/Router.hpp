@@ -12,7 +12,7 @@ class Router
     const Location* findLocation(const std::vector<Location>& locations, const std::string& requestPath);
     public:
         Router(const Config& config);
-        RouteResult route(const HttpRequest& request);
+        RouteResult route(const HttpRequest& request, const Server &listeningServer);
 };
 
 #endif
